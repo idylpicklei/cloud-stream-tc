@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AudioChannelCard } from "../components/AudioChannelCard";
+import { BrandMark } from "../components/BrandMark";
 import { LevelMeter } from "../components/LevelMeter";
 import { StatusBadge } from "../components/StatusBadge";
 import {
@@ -18,10 +19,10 @@ import {
 } from "../lib/audioMixer";
 import { startWhipBroadcast, stopWhipBroadcast, type WhipSession } from "../lib/whip";
 
-const TOKEN_KEY = "classstream-host-token";
+const TOKEN_KEY = "training-center-host-token";
 
 const ROLE_PRESETS = [
-  { id: "teacher", label: "Teacher mic" },
+  { id: "instructor", label: "Instructor mic" },
   { id: "room", label: "Room / classroom mic" },
   { id: "laptop", label: "Laptop / system audio" },
   { id: "extra", label: "Extra input" },
@@ -83,7 +84,7 @@ export function HostPage() {
         setError(hostSession.message);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not unlock host studio");
+      setError(err instanceof Error ? err.message : "Could not unlock the studio");
       setUnlocked(false);
       setBusy(false);
       return;
@@ -184,7 +185,7 @@ export function HostPage() {
     setBusy(true);
     setError(null);
     try {
-      const created = await createLiveInput(token.trim(), "ClassStream classroom");
+      const created = await createLiveInput(token.trim(), "Training Center class");
       setSession(created);
       if (created.message) setError(created.message);
     } catch (err) {
@@ -260,10 +261,9 @@ export function HostPage() {
     return (
       <main className="page host-gate">
         <div className="gate-panel">
-          <p className="eyebrow">Host studio</p>
-          <h1>ClassStream</h1>
+          <BrandMark size="lg" as="h1" />
           <p className="lede">
-            Enter the shared host password to set up cameras and microphones, then start class.
+            Enter the shared host password to set up camera and microphones, then start class.
           </p>
 
           <label className="field">
@@ -272,7 +272,7 @@ export function HostPage() {
               type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              placeholder="HOST_TOKEN from your .dev.vars"
+              placeholder="Shared studio password"
               autoComplete="current-password"
             />
           </label>
@@ -310,11 +310,10 @@ export function HostPage() {
   return (
     <main className="page host-studio">
       <header className="studio-top">
-        <div>
-          <p className="eyebrow">Host studio</p>
-          <h1>ClassStream</h1>
+        <div className="studio-top__brand">
+          <BrandMark size="md" as="h1" />
           <p className="lede">
-            Pick your camera, add microphones, check the mix, then press Start Class.
+            Pick your camera, add microphones, check the mix, then press Start class.
           </p>
         </div>
         <StatusBadge live={live} />
@@ -324,7 +323,7 @@ export function HostPage() {
         <div className="preview-shell">
           <video ref={previewRef} className="camera-preview" autoPlay muted playsInline />
           <div className="preview-caption">
-            You are looking at your camera preview. Students see this plus your mixed audio.
+            Camera preview — students see this plus your mixed audio.
           </div>
         </div>
 
@@ -335,7 +334,7 @@ export function HostPage() {
             disabled={busy}
             onClick={() => void (live ? endClass() : startClass())}
           >
-            {busy ? "Please wait…" : live ? "End Class" : "Start Class"}
+            {busy ? "Please wait…" : live ? "End class" : "Start class"}
           </button>
 
           <p className="hint">
@@ -409,7 +408,9 @@ export function HostPage() {
         <div className="section-head">
           <div>
             <h2>2. Audio channels</h2>
-            <p>Add teacher mic, room mic, laptop audio, or extras. Each has Mute, Solo, and Volume.</p>
+            <p>
+              Add instructor mic, room mic, laptop audio, or extras. Each has Mute, Solo, and Volume.
+            </p>
           </div>
           <div className="mix-meter">
             <span>Outgoing mix</span>
@@ -454,7 +455,7 @@ export function HostPage() {
 
         <div className="channel-grid">
           {channels.length === 0 ? (
-            <p className="empty-hint">No microphones yet. Add at least one before Start Class.</p>
+            <p className="empty-hint">No microphones yet. Add at least one before Start class.</p>
           ) : (
             channels.map((channel) => (
               <AudioChannelCard

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { BrandMark } from "../components/BrandMark";
 import { StatusBadge } from "../components/StatusBadge";
 import { fetchViewerConfig, type ViewerConfig } from "../lib/api";
 import { startWhepPlayback, stopWhepPlayback, type WhepSession } from "../lib/whep";
@@ -20,7 +21,7 @@ export function ViewerPage() {
         if (data.needsSetup) {
           setError(
             data.message ??
-              "This class is not set up yet. Ask the teacher to create a live input in the host studio.",
+              "This class is not set up yet. Ask the instructor to create a live input in the studio.",
           );
           return;
         }
@@ -29,10 +30,10 @@ export function ViewerPage() {
       })
       .catch((err) => {
         const message =
-          err instanceof Error ? err.message : "Could not load class stream";
+          err instanceof Error ? err.message : "Could not load the live class";
         setError(
           message.includes("STREAM_LIVE_INPUT_UID")
-            ? "This class is not set up yet. Ask the teacher to create a live input in the host studio."
+            ? "This class is not set up yet. Ask the instructor to create a live input in the studio."
             : message,
         );
       });
@@ -80,11 +81,10 @@ export function ViewerPage() {
   return (
     <main className="page viewer-page">
       <header className="viewer-top">
-        <div>
-          <p className="eyebrow">Watch live</p>
-          <h1>ClassStream</h1>
+        <div className="viewer-top__brand">
+          <BrandMark size="md" as="h1" />
           <p className="lede">
-            {config?.name ?? "Classroom"} — press Watch when your teacher starts class.
+            {config?.name ?? "Live class"} — press Watch when your instructor starts class.
           </p>
         </div>
         <StatusBadge live={live} label={live ? "In class" : "Waiting"} />
@@ -94,7 +94,7 @@ export function ViewerPage() {
         {mode === "player" && config?.playerUrl ? (
           <div className="player-frame">
             <iframe
-              title="ClassStream player"
+              title="Training Center player"
               src={`${config.playerUrl}?autoplay=true&muted=true`}
               allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen"
               allowFullScreen
@@ -137,7 +137,7 @@ export function ViewerPage() {
               className={`btn btn--xl ${watching ? "btn--danger" : "btn--primary"}`}
               onClick={() => void (watching ? stopWatching() : watchWhep())}
             >
-              {watching ? "Stop watching" : "Watch class"}
+              {watching ? "Stop watching" : "Watch"}
             </button>
           ) : (
             <p className="hint">
