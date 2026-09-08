@@ -7,6 +7,12 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
+  // Student talk-back relay. SQLite-backed Durable Objects are available on the free plan;
+  // `wrangler deploy` applies the migration automatically.
+  "durable_objects": {
+    "bindings": [{ "name": "CLASSROOM", "class_name": "ClassRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ClassRoom"] }],
   // Non-secret defaults. Put secrets in `.dev.vars` locally and via `wrangler secret` in prod.
   "vars": {
     "STREAM_CUSTOMER_CODE": "",

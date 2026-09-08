@@ -66,9 +66,23 @@ Set `STREAM_LIVE_INPUT_UID` and `STREAM_CUSTOMER_CODE` in `wrangler.jsonc` `vars
 
 Audio is mixed in the browser (Web Audio API) into **one** outgoing track — Stream live ingest is a single A/V mix. Video is composed on a canvas (main camera + optional PiP) before publish.
 
+### Live sources board
+
+Under the preview, **Live sources** lists every visual feed (main camera, slideshow, second camera, screen share) and every audio channel with an on/off switch. Switching the main camera off promotes the active PiP feed to the full stage (or composes a "Camera off" card), so slides-only or audio-only teaching works without stopping the class.
+
+The **PiP full / Camera full** button on the preview (also in the Visual feeds header) swaps which feed fills the stage and which sits in the corner — one click to go from "camera with slides in the corner" to "slides with camera in the corner". This changes what students receive. **Fullscreen** next to it only enlarges the local preview on the instructor's screen.
+
+### Student talk-back (push-to-talk)
+
+Cloudflare Stream live inputs are one-way, so student audio comes back over a separate WebSocket relay (`/api/room/ws`, handled by the `ClassRoom` Durable Object). Students hold **Talk** on `/watch`; the instructor hears them on their own speakers/headphones and can tick **Also send student voices into the live mix** so every viewer hears the question. The **Student talk-back** switch disables the students' Talk button entirely. Headphones are recommended for the instructor so the room mic does not re-capture student audio.
+
 ## Watch (students)
 
-Open `/watch`. Prefer **Ultra-low latency** (WHEP) while the instructor is live via WHIP. **Stream player** also works when `STREAM_CUSTOMER_CODE` is set (player auto-upgrades to WHEP for WebRTC inputs).
+Open `/watch`. **Ultra-low latency** (WHEP) is the default while the instructor is live via WHIP. **Stream player** also works when `STREAM_CUSTOMER_CODE` is set (player auto-upgrades to WHEP for WebRTC inputs).
+
+- **Mute** silences the class audio on your device only (shortcut `M`).
+- **Hold to talk** (or hold `Space`) sends your microphone to the instructor; release to mute. Switch to **Press to toggle** if holding is awkward. Your name (optional) is shown to the instructor while you talk.
+- **Fullscreen** (`F`) fills the screen with the class while keeping Mute and Talk visible; **Pop out** floats the video in a small always-on-top window (browsers that support picture-in-picture, ultra-low-latency mode).
 
 ## Deploy
 
@@ -76,9 +90,12 @@ Open `/watch`. Prefer **Ultra-low latency** (WHEP) while the instructor is live 
 npm run deploy
 ```
 
+The first deploy after this feature applies the `ClassRoom` Durable Object migration (`new_sqlite_classes`, available on the free plan). No new secrets are required — the relay reuses `HOST_TOKEN` to authenticate host tabs.
+
 ## Notes
 
 - Ingest path: browser → **WHIP** → Cloudflare Stream live input.
 - WHIP inputs use WebRTC end-to-end; HLS recording for WHIP is not available yet (per Cloudflare Stream WebRTC docs).
 - Do not share the WHIP URL; the Worker only returns it to hosts with a valid `HOST_TOKEN`.
 - Serve over `https` or `localhost` (required for `getUserMedia`).
+- Talk-back audio is 16 kHz mono PCM over WebSocket (~256 kbps per student, only while their Talk button is held). It is not part of the Stream recording/playback unless the instructor sends it into the live mix.
