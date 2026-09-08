@@ -163,7 +163,7 @@ export class ClassRoom extends DurableObject<Env> {
 
     const state = this.roomState();
     send(ws, { type: "welcome", role: attachment.role, serial: attachment.serial, ...state });
-    this.broadcastRoomState(ws);
+    this.broadcastRoomState({ skip: ws });
   }
 
   private relayAudio(ws: WebSocket, attachment: Attachment, frame: ArrayBuffer): void {
@@ -202,7 +202,8 @@ export class ClassRoom extends DurableObject<Env> {
         active: false,
       });
     }
-    this.broadcastRoomState(ws);
+    // The closing socket may still be listed by getWebSockets() here; leave it out.
+    this.broadcastRoomState({ exclude: ws });
   }
 
   private silenceAllViewers(): void {
@@ -231,11 +232,17 @@ export class ClassRoom extends DurableObject<Env> {
     return { talkbackEnabled: this.talkbackEnabled, hostOnline, viewerCount };
   }
 
-  private broadcastRoomState(skipWelcomed?: WebSocket): void {
-    const state = this.roomState();
+  /**
+   * @param skip    socket that already received this state in its welcome
+   * @param exclude socket that is leaving: neither counted nor messaged
+   */
+  private broadcastRoomState(options: { skip?: WebSocket; exclude?: WebSocket } = {}): void {
+    const state = this.roomState(options.exclude);
     const message: ServerMessage = { type: "room", ...state };
     for (const { socket, att } of this.sockets()) {
-      if (att.role === "pending" || socket === skipWelcomed) continue;
+      if (att.role === "pending" || socket === options.skip || socket === options.exclude) {
+        continue;
+      }
       send(socket, message);
     }
   }
