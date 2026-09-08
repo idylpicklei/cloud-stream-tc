@@ -1,0 +1,27 @@
+# Dependencies
+node_modules
+
+# Build
+dist
+dist-ssr
+*.local
+
+# Cloudflare / Wrangler
+.wrangler
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+.idea
+.vscode
+
+# Logs / coverage
+logs
+*.log
+npm-debug.log*
+coverage
+*.tsbuildinfo
