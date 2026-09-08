@@ -70,6 +70,8 @@ Audio is mixed in the browser (Web Audio API) into **one** outgoing track — St
 
 Under the preview, **Live sources** lists every visual feed (main camera, slideshow, second camera, screen share) and every audio channel with an on/off switch. Switching the main camera off promotes the active PiP feed to the full stage (or composes a "Camera off" card), so slides-only or audio-only teaching works without stopping the class.
 
+The **PiP full / Camera full** button on the preview (also in the Visual feeds header) swaps which feed fills the stage and which sits in the corner — one click to go from "camera with slides in the corner" to "slides with camera in the corner". This changes what students receive. **Fullscreen** next to it only enlarges the local preview on the instructor's screen.
+
 ### Student talk-back (push-to-talk)
 
 Cloudflare Stream live inputs are one-way, so student audio comes back over a separate WebSocket relay (`/api/room/ws`, handled by the `ClassRoom` Durable Object). Students hold **Talk** on `/watch`; the instructor hears them on their own speakers/headphones and can tick **Also send student voices into the live mix** so every viewer hears the question. The **Student talk-back** switch disables the students' Talk button entirely. Headphones are recommended for the instructor so the room mic does not re-capture student audio.
@@ -80,6 +82,7 @@ Open `/watch`. **Ultra-low latency** (WHEP) is the default while the instructor 
 
 - **Mute** silences the class audio on your device only (shortcut `M`).
 - **Hold to talk** (or hold `Space`) sends your microphone to the instructor; release to mute. Switch to **Press to toggle** if holding is awkward. Your name (optional) is shown to the instructor while you talk.
+- **Fullscreen** (`F`) fills the screen with the class while keeping Mute and Talk visible; **Pop out** floats the video in a small always-on-top window (browsers that support picture-in-picture, ultra-low-latency mode).
 
 ## Deploy
 

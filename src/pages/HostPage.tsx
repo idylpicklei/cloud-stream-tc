@@ -54,6 +54,61 @@ const SIZE_OPTIONS: { id: PipSize; label: string }[] = [
   { id: "large", label: "Large" },
 ];
 
+function pipSourceLabel(source: PipSource): string {
+  switch (source) {
+    case "slideshow":
+      return "slides";
+    case "camera":
+      return "2nd camera";
+    case "screen":
+      return "screen share";
+    default:
+      return "PiP";
+  }
+}
+
+function SwapIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <rect x="13" y="12" width="6" height="5" rx="1" />
+      <path d="M7 8h5M7 8l2-2M7 8l2 2" />
+    </svg>
+  );
+}
+
+function FullscreenIcon({ exit }: { exit: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {exit ? (
+        <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+      ) : (
+        <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+      )}
+    </svg>
+  );
+}
+
 export function HostPage() {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) ?? "");
   const [unlocked, setUnlocked] = useState(false);
@@ -80,6 +135,8 @@ export function HostPage() {
   );
   const [secondaryLabel, setSecondaryLabel] = useState<string | null>(null);
   const [cameraOn, setCameraOn] = useState(true);
+  const [swapped, setSwapped] = useState(false);
+  const [previewFullscreen, setPreviewFullscreen] = useState(false);
 
   const [roomStatus, setRoomStatus] = useState<RoomStatus>("closed");
   const [roomState, setRoomState] = useState<RoomState>({
@@ -94,6 +151,7 @@ export function HostPage() {
   );
 
   const previewHostRef = useRef<HTMLDivElement>(null);
+  const previewShellRef = useRef<HTMLDivElement>(null);
   const mixerRef = useRef<AudioMixer | null>(null);
   const compositorRef = useRef<VideoCompositor | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
@@ -124,6 +182,7 @@ export function HostPage() {
   );
 
   const cameraLabel = cameras.find((cam) => cam.deviceId === cameraId)?.label || "Camera";
+  const pipBadge = !cameraOn || swapped ? "Full stage" : "PiP";
   const secondaryCameraLabel =
     cameras.find((cam) => cam.deviceId === secondaryCameraId)?.label ||
     secondaryCameras[0]?.label ||
@@ -140,6 +199,17 @@ export function HostPage() {
     ensureCompositor();
     mountPreviewCanvas();
   }, [unlocked]);
+
+  useEffect(() => {
+    const onChange = () => {
+      setPreviewFullscreen(
+        document.fullscreenElement != null &&
+          document.fullscreenElement === previewShellRef.current,
+      );
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
 
   // Talk-back relay: stay connected the whole time the studio is open so the
   // instructor can hear students before, during, and after going live.
@@ -305,6 +375,27 @@ export function HostPage() {
     }
     localStorage.setItem(TALKBACK_MONITOR_KEY, enabled ? "on" : "off");
     setTalkbackMonitor(enabled);
+  }
+
+  function toggleSwap() {
+    const compositor = ensureCompositor();
+    const next = !compositor.isSwapped;
+    compositor.setSwapped(next);
+    setSwapped(next);
+  }
+
+  async function togglePreviewFullscreen() {
+    const shell = previewShellRef.current;
+    if (!shell) return;
+    try {
+      if (document.fullscreenElement === shell) {
+        await document.exitFullscreen();
+      } else {
+        await shell.requestFullscreen();
+      }
+    } catch {
+      setError("Fullscreen is not available in this browser.");
+    }
   }
 
   async function toggleCamera(on: boolean) {
@@ -724,11 +815,47 @@ export function HostPage() {
       </header>
 
       <section className="studio-hero" aria-label="Composition preview and go-live controls">
-        <div className="preview-shell">
+        <div ref={previewShellRef} className="preview-shell">
           <div ref={previewHostRef} className="composition-host" />
+          <div className="preview-toolbar">
+            <button
+              type="button"
+              className={`btn btn--overlay${swapped ? " is-active" : ""}`}
+              disabled={pipSource === "off" || !cameraOn}
+              aria-pressed={swapped}
+              title={
+                pipSource === "off"
+                  ? "Turn on a slideshow, second camera or screen share to swap layouts"
+                  : !cameraOn
+                    ? "Main camera is off — the PiP feed already fills the stage"
+                    : swapped
+                      ? "Camera back to full stage, PiP feed to the corner"
+                      : "PiP feed to full stage, camera to the corner"
+              }
+              onClick={toggleSwap}
+            >
+              <SwapIcon />
+              {swapped ? "Camera full" : "PiP full"}
+            </button>
+            <button
+              type="button"
+              className="btn btn--overlay"
+              aria-pressed={previewFullscreen}
+              title="Fullscreen preview on this screen (does not change the stream)"
+              onClick={() => void togglePreviewFullscreen()}
+            >
+              <FullscreenIcon exit={previewFullscreen} />
+              {previewFullscreen ? "Exit" : "Fullscreen"}
+            </button>
+          </div>
           <div className="preview-caption">
-            Live composition preview — students see this picture (main + PiP) plus your mixed
-            audio.
+            Live composition preview — students see this picture (
+            {pipSource === "off" || !cameraOn
+              ? "main stage"
+              : swapped
+                ? `${pipSourceLabel(pipSource)} full, camera PiP`
+                : `camera full, ${pipSourceLabel(pipSource)} PiP`}
+            ) plus your mixed audio.
           </div>
         </div>
 
@@ -805,7 +932,19 @@ export function HostPage() {
 
         <div className="sources-grid">
           <div className="sources-column">
-            <h3>Visual feeds</h3>
+            <div className="sources-column__head">
+              <h3>Visual feeds</h3>
+              <button
+                type="button"
+                className={`btn btn--secondary btn--small btn--icon${swapped ? " is-active" : ""}`}
+                disabled={pipSource === "off" || !cameraOn}
+                aria-pressed={swapped}
+                onClick={toggleSwap}
+              >
+                <SwapIcon />
+                {swapped ? "Swap → camera full" : "Swap → PiP full"}
+              </button>
+            </div>
             <ul className="source-list">
               <SourceRow
                 title="Main camera"
@@ -813,7 +952,7 @@ export function HostPage() {
                 on={cameraOn}
                 onToggle={(on) => void toggleCamera(on)}
                 disabled={busy}
-                badge={cameraOn ? "Stage" : undefined}
+                badge={cameraOn ? (swapped && pipSource !== "off" ? "PiP" : "Stage") : undefined}
               />
               <SourceRow
                 title="Slideshow"
@@ -825,7 +964,7 @@ export function HostPage() {
                 on={pipSource === "slideshow"}
                 disabled={!slideMeta || busy}
                 onToggle={(on) => void applyPipSource(on ? "slideshow" : "off")}
-                badge={pipSource === "slideshow" ? (cameraOn ? "PiP" : "Full stage") : undefined}
+                badge={pipSource === "slideshow" ? pipBadge : undefined}
               >
                 {slideMeta && pipSource === "slideshow" ? (
                   <div className="source-row__actions">
@@ -858,7 +997,7 @@ export function HostPage() {
                 on={pipSource === "camera"}
                 disabled={secondaryCameras.length === 0 || busy}
                 onToggle={(on) => void applyPipSource(on ? "camera" : "off")}
-                badge={pipSource === "camera" ? (cameraOn ? "PiP" : "Full stage") : undefined}
+                badge={pipSource === "camera" ? pipBadge : undefined}
               />
               <SourceRow
                 title="Screen share"
@@ -870,7 +1009,7 @@ export function HostPage() {
                 on={pipSource === "screen"}
                 disabled={busy}
                 onToggle={(on) => void applyPipSource(on ? "screen" : "off")}
-                badge={pipSource === "screen" ? (cameraOn ? "PiP" : "Full stage") : undefined}
+                badge={pipSource === "screen" ? pipBadge : undefined}
               />
             </ul>
           </div>

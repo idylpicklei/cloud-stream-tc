@@ -49,6 +49,33 @@ function SpeakerIcon({ muted }: { muted: boolean }) {
   );
 }
 
+function ViewIcon({ kind }: { kind: "fullscreen" | "exit" | "popout" }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {kind === "fullscreen" ? (
+        <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+      ) : kind === "exit" ? (
+        <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+      ) : (
+        <>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <rect x="12" y="11" width="7" height="6" rx="1" fill="currentColor" stroke="none" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
@@ -68,6 +95,13 @@ export function ViewerPage() {
   const [watching, setWatching] = useState(false);
   const [muted, setMuted] = useState(false);
   const [playerSdkReady, setPlayerSdkReady] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [poppedOut, setPoppedOut] = useState(false);
+  const stageRef = useRef<HTMLElement>(null);
+  const pipSupported =
+    typeof document !== "undefined" &&
+    "pictureInPictureEnabled" in document &&
+    document.pictureInPictureEnabled;
 
   const [viewerName, setViewerName] = useState(() => localStorage.getItem(NAME_KEY) ?? "");
   const [roomStatus, setRoomStatus] = useState<RoomStatus>("closed");
@@ -201,19 +235,72 @@ export function ViewerPage() {
     setMuted((prev) => !prev);
   }, []);
 
-  // Keyboard: Space = talk (hold or toggle), M = mute. Ignored while typing.
+  // Fullscreen the whole stage (video + control bar) so Mute / Talk stay reachable.
+  const toggleFullscreen = useCallback(async () => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await stage.requestFullscreen();
+      }
+    } catch {
+      setError("Fullscreen is not available in this browser.");
+    }
+  }, []);
+
+  const togglePopOut = useCallback(async () => {
+    const video = videoRef.current;
+    if (!video) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else if (video.readyState >= 1) {
+        await video.requestPictureInPicture();
+      } else {
+        setError("Press Watch first, then pop the video out.");
+      }
+    } catch {
+      setError("Picture-in-picture is not available for this video.");
+    }
+  }, []);
+
+  useEffect(() => {
+    const onFullscreen = () => setFullscreen(document.fullscreenElement != null);
+    document.addEventListener("fullscreenchange", onFullscreen);
+    return () => document.removeEventListener("fullscreenchange", onFullscreen);
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const onEnter = () => setPoppedOut(true);
+    const onLeave = () => setPoppedOut(false);
+    video.addEventListener("enterpictureinpicture", onEnter);
+    video.addEventListener("leavepictureinpicture", onLeave);
+    return () => {
+      video.removeEventListener("enterpictureinpicture", onEnter);
+      video.removeEventListener("leavepictureinpicture", onLeave);
+    };
+  }, [mode]);
+
+  // Keyboard: Space = talk (hold or toggle), M = mute, F = fullscreen. Ignored while typing.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.code === "Space") {
         event.preventDefault();
         if (event.repeat) return;
         if (pttModeRef.current === "toggle") toggleTalk();
         else pressTalk();
       } else if (event.key === "m" || event.key === "M") {
-        if (event.metaKey || event.ctrlKey || event.altKey) return;
         event.preventDefault();
         toggleMute();
+      } else if (event.key === "f" || event.key === "F") {
+        event.preventDefault();
+        void toggleFullscreen();
       }
     };
     const onKeyUp = (event: KeyboardEvent) => {
@@ -233,7 +320,7 @@ export function ViewerPage() {
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
     };
-  }, [pressTalk, releaseTalk, toggleTalk, toggleMute]);
+  }, [pressTalk, releaseTalk, toggleTalk, toggleMute, toggleFullscreen]);
 
   // Local mute: only this viewer's playback, never the stream itself.
   useEffect(() => {
@@ -361,7 +448,7 @@ export function ViewerPage() {
         <StatusBadge live={live} label={live ? "In class" : "Waiting"} />
       </header>
 
-      <section className="viewer-stage">
+      <section ref={stageRef} className={`viewer-stage${fullscreen ? " is-fullscreen" : ""}`}>
         {mode === "player" && config?.playerUrl ? (
           <div className="player-frame">
             <iframe
@@ -409,6 +496,32 @@ export function ViewerPage() {
             {muted ? "Unmute" : "Mute"}
             <span className="mute-btn__hint">only for you</span>
           </button>
+
+          <div className="view-controls" role="group" aria-label="Viewing layout">
+            <button
+              type="button"
+              className={`btn btn--secondary view-btn${fullscreen ? " is-active" : ""}`}
+              aria-pressed={fullscreen}
+              title="Fullscreen with Mute and Talk still visible (F)"
+              onClick={() => void toggleFullscreen()}
+            >
+              <ViewIcon kind={fullscreen ? "exit" : "fullscreen"} />
+              {fullscreen ? "Exit fullscreen" : "Fullscreen"}
+            </button>
+            {pipSupported && mode === "whep" ? (
+              <button
+                type="button"
+                className={`btn btn--secondary view-btn${poppedOut ? " is-active" : ""}`}
+                aria-pressed={poppedOut}
+                disabled={!watching}
+                title="Float the class video in a small always-on-top window"
+                onClick={() => void togglePopOut()}
+              >
+                <ViewIcon kind="popout" />
+                {poppedOut ? "Bring back" : "Pop out"}
+              </button>
+            ) : null}
+          </div>
 
           <div className={`ptt${talking ? " is-talking" : ""}${!talkbackAllowed ? " is-disabled" : ""}`}>
             <button
@@ -509,8 +622,8 @@ export function ViewerPage() {
           ) : null}
 
           <p className="hint">
-            Shortcuts: <kbd>Space</kbd> talk · <kbd>M</kbd> mute. Headphones help avoid echo when
-            you talk.
+            Shortcuts: <kbd>Space</kbd> talk · <kbd>M</kbd> mute · <kbd>F</kbd> fullscreen.
+            Headphones help avoid echo when you talk.
           </p>
 
           {error ? <p className="error-banner">{error}</p> : null}

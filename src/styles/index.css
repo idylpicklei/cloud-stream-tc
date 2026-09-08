@@ -1038,7 +1038,151 @@ h3 {
   accent-color: var(--accent);
 }
 
+/* —— Host: preview overlay toolbar (swap / fullscreen) —— */
+.preview-toolbar {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+  display: flex;
+  gap: 0.45rem;
+  z-index: 2;
+}
+
+.btn--overlay {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.88rem;
+  background: rgba(7, 19, 28, 0.72);
+  color: #e8f6fc;
+  border-color: rgba(224, 247, 255, 0.28);
+  backdrop-filter: blur(6px);
+}
+
+.btn--overlay:hover:not(:disabled) {
+  background: rgba(7, 19, 28, 0.88);
+}
+
+.btn--overlay.is-active {
+  background: rgba(34, 211, 238, 0.28);
+  border-color: rgba(34, 211, 238, 0.6);
+  color: #fff;
+}
+
+.btn--overlay:disabled {
+  opacity: 0.45;
+}
+
+.preview-shell:fullscreen {
+  display: grid;
+  place-items: center;
+  background: #000;
+  border-radius: 0;
+}
+
+.preview-shell:fullscreen .composition-host {
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+.preview-shell:fullscreen .composition-preview {
+  width: 100vw;
+  height: 100vh;
+  aspect-ratio: auto;
+  object-fit: contain;
+}
+
+.preview-shell:fullscreen .preview-caption {
+  display: none;
+}
+
+.sources-column__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.btn--icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.btn--secondary.is-active {
+  background: rgba(14, 116, 144, 0.12);
+  border-color: rgba(14, 116, 144, 0.45);
+  color: var(--accent-deep);
+}
+
 /* —— Viewer: control bar, mute, push-to-talk —— */
+.view-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  justify-content: center;
+}
+
+.view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.8rem;
+  font-size: 0.92rem;
+  white-space: nowrap;
+}
+
+.viewer-stage:fullscreen,
+.viewer-stage.is-fullscreen {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 0;
+  background: #07131c;
+  border: 0;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.viewer-stage:fullscreen .player-frame {
+  aspect-ratio: auto;
+  min-height: 0;
+  height: 100%;
+}
+
+.viewer-stage:fullscreen .player-frame video,
+.viewer-stage:fullscreen .player-frame iframe {
+  object-fit: contain;
+}
+
+.viewer-stage:fullscreen .viewer-actions {
+  display: none;
+}
+
+.viewer-stage:fullscreen .viewer-controlbar {
+  align-items: center;
+}
+
+.viewer-stage:fullscreen .ptt {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.viewer-stage:fullscreen .view-btn {
+  background: #fff;
+  color: var(--ink);
+}
+
+.viewer-stage:fullscreen .view-btn.is-active {
+  background: #cffafe;
+  border-color: #22d3ee;
+  color: var(--accent-deep);
+}
+
 .viewer-controlbar {
   display: flex;
   flex-wrap: wrap;
@@ -1239,6 +1383,21 @@ kbd {
   .viewer-controlbar > .btn--xl,
   .mute-btn {
     width: 100%;
+  }
+
+  .view-controls {
+    flex-direction: row;
+    width: 100%;
+  }
+
+  .view-controls .view-btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .preview-toolbar .btn--overlay {
+    padding: 0.4rem 0.55rem;
+    font-size: 0.8rem;
   }
 
   .ptt {

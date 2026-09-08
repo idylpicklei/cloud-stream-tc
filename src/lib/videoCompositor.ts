@@ -27,6 +27,8 @@ export class VideoCompositor {
   private corner: PipCorner = "bottom-right";
   private pipSize: PipSize = "medium";
   private mainEnabled = true;
+  /** When true, the PiP source fills the stage and the main camera sits in the PiP box. */
+  private swapped = false;
   private raf: number | null = null;
   private outputStream: MediaStream | null = null;
   private running = false;
@@ -75,6 +77,15 @@ export class VideoCompositor {
 
   get hasPip(): boolean {
     return this.pipMode !== "none";
+  }
+
+  /** Flip which feed fills the stage: camera (default) or the PiP source. */
+  setSwapped(swapped: boolean): void {
+    this.swapped = swapped;
+  }
+
+  get isSwapped(): boolean {
+    return this.swapped;
   }
 
   async setPipVideoStream(stream: MediaStream | null): Promise<void> {
@@ -180,13 +191,36 @@ export class VideoCompositor {
       return;
     }
 
-    if (this.mainVideo.readyState >= 2) {
+    const mainReady = this.mainVideo.readyState >= 2;
+
+    if (pipSource && this.swapped) {
+      // Swapped layout: slides / second feed on the stage, camera in the corner.
+      drawContain(ctx, pipSource, 0, 0, canvas.width, canvas.height);
+      if (!mainReady) return;
+      this.drawPipBox(this.mainVideo, drawCover);
+      return;
+    }
+
+    if (mainReady) {
       drawCover(ctx, this.mainVideo, 0, 0, canvas.width, canvas.height);
     }
 
     if (!pipSource) return;
-    const source = pipSource;
+    this.drawPipBox(pipSource, drawContain);
+  }
 
+  private drawPipBox(
+    source: CanvasImageSource,
+    draw: (
+      ctx: CanvasRenderingContext2D,
+      source: CanvasImageSource,
+      dx: number,
+      dy: number,
+      dw: number,
+      dh: number,
+    ) => void,
+  ): void {
+    const { ctx, canvas } = this;
     const box = pipRect(canvas.width, canvas.height, this.corner, this.pipSize);
     ctx.save();
     roundRectPath(ctx, box.x - 3, box.y - 3, box.w + 6, box.h + 6, PIP_RADIUS + 2);
@@ -197,7 +231,7 @@ export class VideoCompositor {
     ctx.save();
     roundRectPath(ctx, box.x, box.y, box.w, box.h, PIP_RADIUS);
     ctx.clip();
-    drawContain(ctx, source, box.x, box.y, box.w, box.h);
+    draw(ctx, source, box.x, box.y, box.w, box.h);
     ctx.restore();
 
     ctx.save();
