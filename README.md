@@ -54,13 +54,17 @@ Set `STREAM_LIVE_INPUT_UID` and `STREAM_CUSTOMER_CODE` in `wrangler.jsonc` `vars
 
 1. Open `/host`, enter `HOST_TOKEN`.
 2. Allow camera/mic permissions.
-3. Choose a camera.
-4. **Add channel** for instructor mic, room mic, laptop audio, etc. Use Mute / Solo / Volume and watch meters.
-5. Press **Start class**.
-6. Copy the viewer link and share it.
-7. Press **End class** when finished.
+3. Choose the **main camera** (fills the stage).
+4. Optionally enable **picture-in-picture**:
+   - Upload a **slideshow** (PDF and/or images) and step through slides, or
+   - Attach a **second camera** or **screen/tab share** as the PiP source.
+   - Pick PiP corner and size. The studio preview shows the composed picture.
+5. **Add channel** for instructor mic, room mic, laptop audio, etc. Use Mute / Solo / Volume and watch meters.
+6. Press **Start class** — the composed video (main + PiP) is what WHIP publishes.
+7. Copy the viewer link and share it.
+8. Press **End class** when finished.
 
-Audio is mixed in the browser (Web Audio API) into **one** outgoing track — Stream live ingest is a single A/V mix.
+Audio is mixed in the browser (Web Audio API) into **one** outgoing track — Stream live ingest is a single A/V mix. Video is composed on a canvas (main camera + optional PiP) before publish.
 
 ## Watch (students)
 
