@@ -91,21 +91,42 @@ export function HostPage() {
   }
 
   async function setupDevices() {
-    const audioDevices = await listAudioInputDevices();
-    const videoDevices = await listVideoInputDevices();
-    setMics(audioDevices);
-    setCameras(videoDevices);
-    if (!cameraId && videoDevices[0]) setCameraId(videoDevices[0].deviceId);
-    if (!addDeviceId && audioDevices[0]) setAddDeviceId(audioDevices[0].deviceId);
+    try {
+      const audioDevices = await listAudioInputDevices();
+      const videoDevices = await listVideoInputDevices();
+      setMics(audioDevices);
+      setCameras(videoDevices);
+      if (!cameraId && videoDevices[0]) setCameraId(videoDevices[0].deviceId);
+      if (!addDeviceId && audioDevices[0]) setAddDeviceId(audioDevices[0].deviceId);
 
-    if (!mixerRef.current) {
-      const mixer = new AudioMixer();
-      mixerRef.current = mixer;
-      mixer.onLevels(setLevels);
-    }
+      if (!mixerRef.current) {
+        const mixer = new AudioMixer();
+        mixerRef.current = mixer;
+        mixer.onLevels(setLevels);
+      }
 
-    if (videoDevices[0]) {
-      await attachCamera(videoDevices[0].deviceId);
+      if (videoDevices[0]) {
+        await attachCamera(videoDevices[0].deviceId);
+      } else {
+        setError(
+          "No camera found yet. Plug one in (or allow access), then pick it under Camera.",
+        );
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `Studio opened, but devices need attention: ${err.message}`
+          : "Studio opened, but camera/mic setup needs attention.",
+      );
+      if (!mixerRef.current) {
+        try {
+          const mixer = new AudioMixer();
+          mixerRef.current = mixer;
+          mixer.onLevels(setLevels);
+        } catch {
+          // AudioContext unavailable — rare
+        }
+      }
     }
   }
 
@@ -113,13 +134,24 @@ export function HostPage() {
     setCameraId(deviceId);
     cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: false,
-    });
-    cameraStreamRef.current = stream;
-    if (previewRef.current) {
-      previewRef.current.srcObject = stream;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          deviceId: { exact: deviceId },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+      cameraStreamRef.current = stream;
+      if (previewRef.current) {
+        previewRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      cameraStreamRef.current = null;
+      throw err instanceof Error
+        ? err
+        : new Error("Could not open that camera");
     }
   }
 

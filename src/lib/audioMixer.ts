@@ -219,14 +219,24 @@ function rmsFromTimeDomain(data: Uint8Array<ArrayBuffer>): number {
 }
 
 export async function listAudioInputDevices(): Promise<MediaDeviceInfo[]> {
-  // Permission prompt so labels are populated
-  const temp = await navigator.mediaDevices.getUserMedia({ audio: true });
-  temp.getTracks().forEach((t) => t.stop());
+  // Permission prompt so labels are populated (best-effort in headless / no-device envs)
+  try {
+    const temp = await navigator.mediaDevices.getUserMedia({ audio: true });
+    temp.getTracks().forEach((t) => t.stop());
+  } catch {
+    // Continue — enumerateDevices may still return devices without labels.
+  }
   const devices = await navigator.mediaDevices.enumerateDevices();
   return devices.filter((d) => d.kind === "audioinput");
 }
 
 export async function listVideoInputDevices(): Promise<MediaDeviceInfo[]> {
+  try {
+    const temp = await navigator.mediaDevices.getUserMedia({ video: true });
+    temp.getTracks().forEach((t) => t.stop());
+  } catch {
+    // Continue without camera permission / hardware.
+  }
   const devices = await navigator.mediaDevices.enumerateDevices();
   return devices.filter((d) => d.kind === "videoinput");
 }
