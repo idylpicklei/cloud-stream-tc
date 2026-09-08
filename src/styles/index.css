@@ -431,7 +431,7 @@ h3 {
 
 .home-hero {
   position: relative;
-  min-height: min(92vh, 760px);
+  min-height: calc(100vh - 2rem);
   display: grid;
   align-content: center;
   gap: 0;
