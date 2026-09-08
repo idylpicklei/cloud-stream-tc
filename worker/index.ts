@@ -3,7 +3,15 @@
  *
  * Protects Stream credentials and hands the host a WHIP publish URL.
  * Viewer endpoints stay public and never expose the WHIP secret.
+ *
+ * `/api/room/ws` upgrades to a WebSocket handled by the ClassRoom Durable
+ * Object, which relays student push-to-talk audio back to the host studio.
  */
+
+import { ROOM_WS_PATH } from "../shared/roomProtocol";
+import { ClassRoom } from "./classRoom";
+
+export { ClassRoom };
 
 export interface Env {
   CLOUDFLARE_ACCOUNT_ID: string;
@@ -13,6 +21,8 @@ export interface Env {
   STREAM_CUSTOMER_CODE: string;
   /** Optional: reuse a live input created in the dashboard or via API */
   STREAM_LIVE_INPUT_UID?: string;
+  /** Talk-back relay room (one per live input). */
+  CLASSROOM: DurableObjectNamespace<ClassRoom>;
 }
 
 interface LiveInputResponse {
@@ -175,6 +185,16 @@ export default {
     }
 
     try {
+      if (url.pathname === ROOM_WS_PATH) {
+        if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+          return json({ error: "Expected a WebSocket upgrade" }, 426);
+        }
+        // One room per live input so a future multi-class setup stays isolated.
+        const roomName = env.STREAM_LIVE_INPUT_UID?.trim() || "default";
+        const stub = env.CLASSROOM.get(env.CLASSROOM.idFromName(roomName));
+        return stub.fetch(request);
+      }
+
       if (url.pathname === "/api/health" && request.method === "GET") {
         return json({
           ok: true,
