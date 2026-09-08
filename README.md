@@ -1,6 +1,8 @@
-# ClassStream (cloud-stream-tc)
+# Training Center
 
-Browser studio for teaching live over **Cloudflare Stream**. Teachers mix several microphones in the browser, go live with **WHIP** (WebRTC), and students watch with the **Stream player** or **WHEP**.
+Browser studio for teaching live over **Cloudflare Stream**. Instructors mix several microphones in the browser, go live with **WHIP** (WebRTC), and students watch with the **Stream player** or **WHEP**.
+
+> Deploy package / Worker name remains `cloud-stream-tc` (unchanged for existing deploys).
 
 ## Quick start
 
@@ -48,21 +50,21 @@ npx wrangler secret put CLOUDFLARE_ACCOUNT_ID
 
 Set `STREAM_LIVE_INPUT_UID` and `STREAM_CUSTOMER_CODE` in `wrangler.jsonc` `vars` (they are not highly sensitive) or as secrets if you prefer.
 
-## Go live (teacher)
+## Go live (instructor)
 
 1. Open `/host`, enter `HOST_TOKEN`.
 2. Allow camera/mic permissions.
 3. Choose a camera.
-4. **Add channel** for teacher mic, room mic, laptop audio, etc. Use Mute / Solo / Volume and watch meters.
-5. Press **Start Class**.
+4. **Add channel** for instructor mic, room mic, laptop audio, etc. Use Mute / Solo / Volume and watch meters.
+5. Press **Start class**.
 6. Copy the viewer link and share it.
-7. Press **End Class** when finished.
+7. Press **End class** when finished.
 
 Audio is mixed in the browser (Web Audio API) into **one** outgoing track — Stream live ingest is a single A/V mix.
 
 ## Watch (students)
 
-Open `/watch`. Prefer **Ultra-low latency** (WHEP) while the teacher is live via WHIP. **Stream player** also works when `STREAM_CUSTOMER_CODE` is set (player auto-upgrades to WHEP for WebRTC inputs).
+Open `/watch`. Prefer **Ultra-low latency** (WHEP) while the instructor is live via WHIP. **Stream player** also works when `STREAM_CUSTOMER_CODE` is set (player auto-upgrades to WHEP for WebRTC inputs).
 
 ## Deploy
 

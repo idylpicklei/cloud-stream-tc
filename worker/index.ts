@@ -1,5 +1,5 @@
 /**
- * ClassStream Worker API
+ * Training Center Worker API
  *
  * Protects Stream credentials and hands the host a WHIP publish URL.
  * Viewer endpoints stay public and never expose the WHIP secret.
@@ -121,7 +121,7 @@ function publicViewerPayload(input: LiveInputResponse, env: Env) {
     playerUrl,
     whepUrl: input.webRTCPlayback?.url ?? null,
     status: input.status?.current?.state ?? "idle",
-    name: input.meta?.name ?? "Class stream",
+    name: input.meta?.name ?? "Training Center class",
     note:
       "This app broadcasts with WHIP (browser WebRTC). Viewers should use WHEP or the Stream player (auto-upgrades to WHEP). HLS recording is not available for WHIP inputs yet.",
   };
@@ -157,7 +157,7 @@ async function resolveLiveInput(
   const created = await streamFetch<LiveInputResponse>(env, "/live_inputs", {
     method: "POST",
     body: JSON.stringify({
-      meta: { name: options.name ?? "ClassStream classroom" },
+      meta: { name: options.name ?? "Training Center class" },
       recording: { mode: "off" },
     }),
   });
@@ -196,10 +196,10 @@ export default {
               playerUrl: null,
               whepUrl: null,
               status: "idle",
-              name: "Class stream",
+              name: "Training Center class",
               needsSetup: true,
               message:
-                "No live input configured yet. The teacher must set STREAM_LIVE_INPUT_UID or create one from the host studio.",
+                "No live input configured yet. The instructor must set STREAM_LIVE_INPUT_UID or create one from the studio.",
             });
           }
           return json({ error: resolved.message }, resolved.status);
@@ -234,7 +234,7 @@ export default {
               playerUrl: null,
               whepUrl: null,
               status: "idle",
-              name: "Class stream",
+              name: "Training Center class",
               whipUrl: null,
               needsLiveInput: true,
               message: resolved.message,
@@ -288,7 +288,7 @@ export default {
         const created = await streamFetch<LiveInputResponse>(env, "/live_inputs", {
           method: "POST",
           body: JSON.stringify({
-            meta: { name: body.name ?? "ClassStream classroom" },
+            meta: { name: body.name ?? "Training Center class" },
             recording: { mode: "off" },
           }),
         });
