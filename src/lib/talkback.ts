@@ -345,21 +345,25 @@ export class TalkbackSender {
 
   private async openMic(): Promise<boolean> {
     this.setMicState("requesting");
+    // Create the context synchronously while the user gesture is still fresh so
+    // strict autoplay policies do not leave it suspended after the permission prompt.
+    const context = new AudioContext();
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-        video: false,
-      });
-      const context = new AudioContext();
-      await context.resume().catch(() => undefined);
+      void context.resume().catch(() => undefined);
       if (!context.audioWorklet) {
         throw new Error("This browser does not support AudioWorklet (needed for talk-back).");
       }
-      await context.audioWorklet.addModule(captureWorkletUrl());
+      const [stream] = await Promise.all([
+        navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: false,
+        }),
+        context.audioWorklet.addModule(captureWorkletUrl()),
+      ]);
 
       const chunkSamples = Math.round((TALKBACK_SAMPLE_RATE * CHUNK_MS) / 1000);
       const node = new AudioWorkletNode(context, "talkback-capture", {
@@ -394,6 +398,7 @@ export class TalkbackSender {
       this.setMicState("ready");
       return true;
     } catch {
+      void context.close().catch(() => undefined);
       this.setMicState("denied");
       return false;
     }

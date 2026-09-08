@@ -1061,8 +1061,7 @@ h3 {
 
 .mute-btn__icon {
   grid-row: 1 / span 2;
-  font-size: 1.5rem;
-  line-height: 1;
+  display: block;
 }
 
 .mute-btn__hint {
