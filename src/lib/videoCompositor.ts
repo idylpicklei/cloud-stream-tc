@@ -26,6 +26,7 @@ export class VideoCompositor {
   private pipMode: "none" | "video" | "still" = "none";
   private corner: PipCorner = "bottom-right";
   private pipSize: PipSize = "medium";
+  private mainEnabled = true;
   private raf: number | null = null;
   private outputStream: MediaStream | null = null;
   private running = false;
@@ -58,6 +59,22 @@ export class VideoCompositor {
     if (stream) {
       await this.mainVideo.play().catch(() => undefined);
     }
+  }
+
+  /**
+   * Hide/show the main camera without touching its stream. While hidden, an
+   * active PiP source fills the stage; with no PiP, a "Camera off" card is drawn.
+   */
+  setMainEnabled(enabled: boolean): void {
+    this.mainEnabled = enabled;
+  }
+
+  get isMainEnabled(): boolean {
+    return this.mainEnabled;
+  }
+
+  get hasPip(): boolean {
+    return this.pipMode !== "none";
   }
 
   async setPipVideoStream(stream: MediaStream | null): Promise<void> {
@@ -143,19 +160,32 @@ export class VideoCompositor {
     ctx.fillStyle = "#07131c";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    const mainPresent = this.mainEnabled && this.mainVideo.srcObject != null;
+    const pipSource =
+      this.pipMode === "none"
+        ? null
+        : this.pipMode === "still"
+          ? this.pipStill
+          : this.pipVideo.readyState >= 2
+            ? this.pipVideo
+            : null;
+
+    if (!mainPresent) {
+      if (pipSource) {
+        // Camera off but a visual feed is on: promote it to the full stage.
+        drawContain(ctx, pipSource, 0, 0, canvas.width, canvas.height);
+      } else {
+        drawOfflineCard(ctx, canvas.width, canvas.height);
+      }
+      return;
+    }
+
     if (this.mainVideo.readyState >= 2) {
       drawCover(ctx, this.mainVideo, 0, 0, canvas.width, canvas.height);
     }
 
-    if (this.pipMode === "none") return;
-
-    const source =
-      this.pipMode === "still"
-        ? this.pipStill
-        : this.pipVideo.readyState >= 2
-          ? this.pipVideo
-          : null;
-    if (!source) return;
+    if (!pipSource) return;
+    const source = pipSource;
 
     const box = pipRect(canvas.width, canvas.height, this.corner, this.pipSize);
     ctx.save();
@@ -177,6 +207,25 @@ export class VideoCompositor {
     ctx.stroke();
     ctx.restore();
   }
+}
+
+function drawOfflineCard(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const gradient = ctx.createLinearGradient(0, 0, w, h);
+  gradient.addColorStop(0, "#0b1f2b");
+  gradient.addColorStop(1, "#07131c");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "rgba(224, 247, 255, 0.9)";
+  ctx.font = "600 44px Sora, 'Segoe UI', sans-serif";
+  ctx.fillText("Camera off", w / 2, h / 2 - 18);
+  ctx.fillStyle = "rgba(224, 247, 255, 0.55)";
+  ctx.font = "500 24px 'Source Sans 3', 'Segoe UI', sans-serif";
+  ctx.fillText("Training Center — audio continues", w / 2, h / 2 + 30);
+  ctx.restore();
 }
 
 function sourceSize(source: CanvasImageSource): { w: number; h: number } {

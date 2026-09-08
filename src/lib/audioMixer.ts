@@ -5,18 +5,22 @@
 
 export type ChannelId = string;
 
+/** "device" = a microphone opened via getUserMedia; "external" = any AudioNode (e.g. talk-back). */
+export type ChannelKind = "device" | "external";
+
 export interface MixerChannel {
   id: ChannelId;
   label: string;
+  kind: ChannelKind;
   deviceId: string;
-  stream: MediaStream;
+  stream: MediaStream | null;
   muted: boolean;
   solo: boolean;
   volume: number; // 0..1
 }
 
 interface InternalChannel extends MixerChannel {
-  source: MediaStreamAudioSourceNode;
+  source: AudioNode;
   gain: GainNode;
   analyser: AnalyserNode;
   data: Uint8Array<ArrayBuffer>;
@@ -46,6 +50,11 @@ export class AudioMixer {
     this.masterAnalyser.connect(this.destination);
   }
 
+  /** Shared context so other graphs (talk-back playback, monitoring) can join the mix. */
+  get audioContext(): AudioContext {
+    return this.context;
+  }
+
   get mixedStream(): MediaStream {
     return this.destination.stream;
   }
@@ -64,12 +73,32 @@ export class AudioMixer {
     return [...this.channels.values()].map((channel) => ({
       id: channel.id,
       label: channel.label,
+      kind: channel.kind,
       deviceId: channel.deviceId,
       stream: channel.stream,
       muted: channel.muted,
       solo: channel.solo,
       volume: channel.volume,
     }));
+  }
+
+  has(id: ChannelId): boolean {
+    return this.channels.has(id);
+  }
+
+  get(id: ChannelId): MixerChannel | null {
+    const channel = this.channels.get(id);
+    if (!channel) return null;
+    return {
+      id: channel.id,
+      label: channel.label,
+      kind: channel.kind,
+      deviceId: channel.deviceId,
+      stream: channel.stream,
+      muted: channel.muted,
+      solo: channel.solo,
+      volume: channel.volume,
+    };
   }
 
   async addDevice(deviceId: string, label: string): Promise<MixerChannel> {
@@ -90,31 +119,78 @@ export class AudioMixer {
     await this.resume();
 
     const source = this.context.createMediaStreamSource(stream);
+    return this.attach({
+      id: deviceId,
+      label: label || "Microphone",
+      kind: "device",
+      deviceId,
+      stream,
+      source,
+      muted: false,
+    });
+  }
+
+  /**
+   * Mix in an arbitrary AudioNode from the same AudioContext (e.g. student
+   * talk-back). The node is not owned by the mixer; `remove` only disconnects it.
+   */
+  addExternalSource(
+    id: ChannelId,
+    label: string,
+    source: AudioNode,
+    options: { muted?: boolean } = {},
+  ): MixerChannel {
+    const existing = this.channels.get(id);
+    if (existing) return existing;
+    if (source.context !== this.context) {
+      throw new Error("External source must come from the mixer's AudioContext");
+    }
+    return this.attach({
+      id,
+      label,
+      kind: "external",
+      deviceId: "",
+      stream: null,
+      source,
+      muted: options.muted ?? false,
+    });
+  }
+
+  private attach(input: {
+    id: ChannelId;
+    label: string;
+    kind: ChannelKind;
+    deviceId: string;
+    stream: MediaStream | null;
+    source: AudioNode;
+    muted: boolean;
+  }): InternalChannel {
     const gain = this.context.createGain();
     const analyser = this.context.createAnalyser();
     analyser.fftSize = 256;
     const data = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
 
-    source.connect(gain);
+    input.source.connect(gain);
     gain.connect(analyser);
     analyser.connect(this.masterGain);
-    gain.gain.value = 1;
+    gain.gain.value = input.muted ? 0 : 1;
 
     const channel: InternalChannel = {
-      id: deviceId,
-      label: label || "Microphone",
-      deviceId,
-      stream,
-      muted: false,
+      id: input.id,
+      label: input.label,
+      kind: input.kind,
+      deviceId: input.deviceId,
+      stream: input.stream,
+      muted: input.muted,
       solo: false,
       volume: 1,
-      source,
+      source: input.source,
       gain,
       analyser,
       data,
     };
 
-    this.channels.set(deviceId, channel);
+    this.channels.set(input.id, channel);
     this.applyGains();
     this.ensureMeterLoop();
     return channel;
@@ -124,10 +200,19 @@ export class AudioMixer {
     const channel = this.channels.get(id);
     if (!channel) return;
 
-    channel.source.disconnect();
+    if (channel.kind === "device") {
+      channel.source.disconnect();
+      channel.stream?.getTracks().forEach((t) => t.stop());
+    } else {
+      // External nodes may feed other graphs (monitoring); only detach from ours.
+      try {
+        channel.source.disconnect(channel.gain);
+      } catch {
+        // Already disconnected.
+      }
+    }
     channel.gain.disconnect();
     channel.analyser.disconnect();
-    channel.stream.getTracks().forEach((t) => t.stop());
     this.channels.delete(id);
     this.applyGains();
   }
@@ -209,7 +294,7 @@ export class AudioMixer {
   }
 }
 
-function rmsFromTimeDomain(data: Uint8Array<ArrayBuffer>): number {
+export function rmsFromTimeDomain(data: Uint8Array<ArrayBuffer>): number {
   let sum = 0;
   for (let i = 0; i < data.length; i++) {
     const v = (data[i] - 128) / 128;

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AudioChannelCard } from "../components/AudioChannelCard";
 import { BrandMark } from "../components/BrandMark";
 import { LevelMeter } from "../components/LevelMeter";
+import { SourceRow } from "../components/SourceRow";
 import { StatusBadge } from "../components/StatusBadge";
 import {
   createLiveInput,
@@ -17,6 +18,7 @@ import {
   listVideoInputDevices,
   type MixerChannel,
 } from "../lib/audioMixer";
+import { RoomConnection, TalkbackReceiver, type RoomStatus } from "../lib/talkback";
 import {
   VideoCompositor,
   type PipCorner,
@@ -24,8 +26,11 @@ import {
 } from "../lib/videoCompositor";
 import { startWhipBroadcast, stopWhipBroadcast, type WhipSession } from "../lib/whip";
 import type { SlideshowDeck } from "../lib/slideshow";
+import type { RoomState } from "../../shared/roomProtocol";
 
 const TOKEN_KEY = "training-center-host-token";
+const TALKBACK_CHANNEL_ID = "__talkback__";
+const TALKBACK_MONITOR_KEY = "training-center-talkback-monitor";
 
 const ROLE_PRESETS = [
   { id: "instructor", label: "Instructor mic" },
@@ -74,6 +79,19 @@ export function HostPage() {
     null,
   );
   const [secondaryLabel, setSecondaryLabel] = useState<string | null>(null);
+  const [cameraOn, setCameraOn] = useState(true);
+
+  const [roomStatus, setRoomStatus] = useState<RoomStatus>("closed");
+  const [roomState, setRoomState] = useState<RoomState>({
+    talkbackEnabled: true,
+    hostOnline: true,
+    viewerCount: 0,
+  });
+  const [talkers, setTalkers] = useState<{ serial: number; name: string }[]>([]);
+  const [talkbackInMix, setTalkbackInMix] = useState(false);
+  const [talkbackMonitor, setTalkbackMonitor] = useState(
+    () => localStorage.getItem(TALKBACK_MONITOR_KEY) !== "off",
+  );
 
   const previewHostRef = useRef<HTMLDivElement>(null);
   const mixerRef = useRef<AudioMixer | null>(null);
@@ -83,6 +101,12 @@ export function HostPage() {
   const deckRef = useRef<SlideshowDeck | null>(null);
   const whipRef = useRef<WhipSession | null>(null);
   const slideInputRef = useRef<HTMLInputElement>(null);
+  const roomRef = useRef<RoomConnection | null>(null);
+  const receiverRef = useRef<TalkbackReceiver | null>(null);
+  const monitorGainRef = useRef<GainNode | null>(null);
+  const talkersRef = useRef(new Map<number, string>());
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
 
   const viewerLink = useMemo(() => {
     if (typeof window === "undefined") return "/watch";
@@ -93,6 +117,17 @@ export function HostPage() {
     () => cameras.filter((cam) => cam.deviceId && cam.deviceId !== cameraId),
     [cameras, cameraId],
   );
+
+  const deviceChannels = useMemo(
+    () => channels.filter((channel) => channel.kind === "device"),
+    [channels],
+  );
+
+  const cameraLabel = cameras.find((cam) => cam.deviceId === cameraId)?.label || "Camera";
+  const secondaryCameraLabel =
+    cameras.find((cam) => cam.deviceId === secondaryCameraId)?.label ||
+    secondaryCameras[0]?.label ||
+    "";
 
   useEffect(() => {
     fetchHealth()
@@ -106,6 +141,56 @@ export function HostPage() {
     mountPreviewCanvas();
   }, [unlocked]);
 
+  // Talk-back relay: stay connected the whole time the studio is open so the
+  // instructor can hear students before, during, and after going live.
+  useEffect(() => {
+    if (!unlocked) return;
+    const room = new RoomConnection({
+      hello: () => ({ type: "hello", role: "host", token: tokenRef.current.trim() }),
+      onStatus: setRoomStatus,
+      onMessage: (message) => {
+        switch (message.type) {
+          case "welcome":
+          case "room":
+            setRoomState({
+              talkbackEnabled: message.talkbackEnabled,
+              hostOnline: true,
+              viewerCount: message.viewerCount,
+            });
+            if (message.type === "welcome") {
+              talkersRef.current.clear();
+              setTalkers([]);
+            }
+            break;
+          case "ptt":
+            if (message.active) {
+              talkersRef.current.set(message.serial, message.name);
+            } else {
+              talkersRef.current.delete(message.serial);
+              receiverRef.current?.forget(message.serial);
+            }
+            setTalkers(
+              [...talkersRef.current.entries()].map(([serial, name]) => ({ serial, name })),
+            );
+            break;
+          case "error":
+            setError(`Talk-back relay: ${message.message}`);
+            break;
+          default:
+            break;
+        }
+      },
+      onBinary: (frame) => {
+        receiverRef.current?.handleFrame(frame);
+      },
+    });
+    roomRef.current = room;
+    return () => {
+      room.close();
+      if (roomRef.current === room) roomRef.current = null;
+    };
+  }, [unlocked]);
+
   useEffect(() => {
     return () => {
       void stopWhipBroadcast(whipRef.current);
@@ -114,6 +199,7 @@ export function HostPage() {
       secondaryStreamRef.current?.getTracks().forEach((t) => t.stop());
       deckRef.current?.dispose();
       compositorRef.current?.dispose();
+      receiverRef.current?.dispose();
       mixerRef.current?.dispose();
     };
   }, []);
@@ -172,9 +258,77 @@ export function HostPage() {
     try {
       const mixer = new AudioMixer();
       mixerRef.current = mixer;
-      mixer.onLevels(setLevels);
+
+      // Student talk-back: monitor on the instructor's speakers, and optionally
+      // ride into the live mix as a regular (initially muted) mixer channel.
+      const receiver = new TalkbackReceiver(mixer.audioContext);
+      receiverRef.current = receiver;
+      const monitor = mixer.audioContext.createGain();
+      monitor.gain.value = talkbackMonitor ? 1 : 0;
+      receiver.output.connect(monitor);
+      monitor.connect(mixer.audioContext.destination);
+      monitorGainRef.current = monitor;
+      mixer.addExternalSource(TALKBACK_CHANNEL_ID, "Student talk-back", receiver.output, {
+        muted: true,
+      });
+      setTalkbackInMix(false);
+
+      mixer.onLevels((next) => {
+        setLevels({ ...next, [TALKBACK_CHANNEL_ID]: receiver.currentLevel() });
+      });
+      syncChannelState();
     } catch {
       // AudioContext unavailable — rare (locked-down browser)
+    }
+  }
+
+  function setTalkbackAllowed(enabled: boolean) {
+    setRoomState((prev) => ({ ...prev, talkbackEnabled: enabled }));
+    roomRef.current?.send({ type: "talkback", enabled });
+    if (!enabled) {
+      talkersRef.current.clear();
+      setTalkers([]);
+    }
+  }
+
+  function applyTalkbackInMix(enabled: boolean) {
+    mixerRef.current?.setMuted(TALKBACK_CHANNEL_ID, !enabled);
+    setTalkbackInMix(enabled);
+    syncChannelState();
+  }
+
+  function applyTalkbackMonitor(enabled: boolean) {
+    const gain = monitorGainRef.current;
+    const context = mixerRef.current?.audioContext;
+    if (gain && context) {
+      gain.gain.setTargetAtTime(enabled ? 1 : 0, context.currentTime, 0.02);
+    }
+    localStorage.setItem(TALKBACK_MONITOR_KEY, enabled ? "on" : "off");
+    setTalkbackMonitor(enabled);
+  }
+
+  async function toggleCamera(on: boolean) {
+    setError(null);
+    const compositor = ensureCompositor();
+    if (!on) {
+      cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
+      cameraStreamRef.current = null;
+      await compositor.setMainStream(null);
+      compositor.setMainEnabled(false);
+      setCameraOn(false);
+      return;
+    }
+    compositor.setMainEnabled(true);
+    setCameraOn(true);
+    const deviceId = cameraId || cameras[0]?.deviceId;
+    if (!deviceId) {
+      setError("No camera found. Plug one in (or allow access), then try again.");
+      return;
+    }
+    try {
+      await attachCamera(deviceId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not open that camera");
     }
   }
 
@@ -227,6 +381,8 @@ export function HostPage() {
       });
       cameraStreamRef.current = stream;
       const compositor = ensureCompositor();
+      compositor.setMainEnabled(true);
+      setCameraOn(true);
       await compositor.setMainStream(stream);
       mountPreviewCanvas();
     } catch (err) {
@@ -438,14 +594,17 @@ export function HostPage() {
       if (!mixer) throw new Error("Audio mixer not ready");
       await mixer.resume();
 
-      if (mixer.list().length === 0) {
+      if (mixer.list().filter((channel) => channel.kind === "device").length === 0) {
         throw new Error("Add at least one microphone before going live.");
       }
-      if (!cameraStreamRef.current) {
-        throw new Error("Turn on your camera before going live.");
+      if (!cameraStreamRef.current && cameraOn) {
+        throw new Error(
+          "Turn on your camera before going live, or switch the Main camera feed off to teach with slides / audio only.",
+        );
       }
 
       const compositor = ensureCompositor();
+      compositor.setMainEnabled(cameraOn);
       await compositor.setMainStream(cameraStreamRef.current);
       mountPreviewCanvas();
       applyPipLayout();
@@ -488,7 +647,7 @@ export function HostPage() {
       setLive(false);
       // Keep compositor + camera + mixer running for a quick re-live.
       mountPreviewCanvas();
-      if (cameraStreamRef.current) {
+      if (cameraStreamRef.current && cameraOn) {
         await compositorRef.current?.setMainStream(cameraStreamRef.current);
       }
     } catch (err) {
@@ -621,6 +780,161 @@ export function HostPage() {
           ) : null}
 
           {error ? <p className="error-banner">{error}</p> : null}
+        </div>
+      </section>
+
+      <section className="studio-section sources-board" aria-label="Live sources">
+        <div className="section-head">
+          <div>
+            <h2>Live sources</h2>
+            <p>
+              Flip any feed on or off. Changes apply instantly to the preview and, when live, to
+              what students receive.
+            </p>
+          </div>
+          <span
+            className={`source-pill source-pill--${roomStatus === "open" ? "ok" : "warn"} room-presence`}
+          >
+            {roomStatus === "open"
+              ? `${roomState.viewerCount} student${roomState.viewerCount === 1 ? "" : "s"} connected`
+              : roomStatus === "connecting"
+                ? "Connecting talk-back relay…"
+                : "Talk-back relay offline"}
+          </span>
+        </div>
+
+        <div className="sources-grid">
+          <div className="sources-column">
+            <h3>Visual feeds</h3>
+            <ul className="source-list">
+              <SourceRow
+                title="Main camera"
+                subtitle={cameraOn ? cameraLabel : "Off — PiP feed fills the stage, or a “Camera off” card"}
+                on={cameraOn}
+                onToggle={(on) => void toggleCamera(on)}
+                disabled={busy}
+                badge={cameraOn ? "Stage" : undefined}
+              />
+              <SourceRow
+                title="Slideshow"
+                subtitle={
+                  slideMeta
+                    ? `Slide ${slideMeta.index + 1} / ${slideMeta.total} · ${slideMeta.name}`
+                    : "Upload slides in section 2 to enable"
+                }
+                on={pipSource === "slideshow"}
+                disabled={!slideMeta || busy}
+                onToggle={(on) => void applyPipSource(on ? "slideshow" : "off")}
+                badge={pipSource === "slideshow" ? (cameraOn ? "PiP" : "Full stage") : undefined}
+              >
+                {slideMeta && pipSource === "slideshow" ? (
+                  <div className="source-row__actions">
+                    <button
+                      type="button"
+                      className="btn btn--secondary btn--small"
+                      disabled={slideMeta.index <= 0}
+                      onClick={() => stepSlide(-1)}
+                    >
+                      Previous slide
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--secondary btn--small"
+                      disabled={slideMeta.index >= slideMeta.total - 1}
+                      onClick={() => stepSlide(1)}
+                    >
+                      Next slide
+                    </button>
+                  </div>
+                ) : null}
+              </SourceRow>
+              <SourceRow
+                title="Second camera"
+                subtitle={
+                  secondaryCameras.length === 0
+                    ? "No other camera detected"
+                    : secondaryCameraLabel || "Second camera"
+                }
+                on={pipSource === "camera"}
+                disabled={secondaryCameras.length === 0 || busy}
+                onToggle={(on) => void applyPipSource(on ? "camera" : "off")}
+                badge={pipSource === "camera" ? (cameraOn ? "PiP" : "Full stage") : undefined}
+              />
+              <SourceRow
+                title="Screen share"
+                subtitle={
+                  pipSource === "screen" && secondaryLabel
+                    ? secondaryLabel
+                    : "Share a window or browser tab"
+                }
+                on={pipSource === "screen"}
+                disabled={busy}
+                onToggle={(on) => void applyPipSource(on ? "screen" : "off")}
+                badge={pipSource === "screen" ? (cameraOn ? "PiP" : "Full stage") : undefined}
+              />
+            </ul>
+          </div>
+
+          <div className="sources-column">
+            <h3>Audio channels</h3>
+            <ul className="source-list">
+              {deviceChannels.length === 0 ? (
+                <li className="empty-hint">No microphones yet — add one in section 3.</li>
+              ) : (
+                deviceChannels.map((channel) => (
+                  <SourceRow
+                    key={channel.id}
+                    title={channel.label}
+                    subtitle={`${Math.round(channel.volume * 100)}% volume${channel.solo ? " · solo" : ""}`}
+                    on={!channel.muted}
+                    level={levels[channel.id] ?? 0}
+                    onToggle={(on) => {
+                      mixerRef.current?.setMuted(channel.id, !on);
+                      syncChannelState();
+                    }}
+                    badge={channel.solo ? "Solo" : undefined}
+                    onText="Live"
+                    offText="Muted"
+                  />
+                ))
+              )}
+              <SourceRow
+                title="Student talk-back"
+                subtitle={
+                  roomState.talkbackEnabled
+                    ? talkers.length > 0
+                      ? `${talkers.map((t) => t.name).join(", ")} talking`
+                      : "Students can hold Talk on /watch to ask a question"
+                    : "Students’ Talk button is disabled"
+                }
+                on={roomState.talkbackEnabled}
+                onToggle={setTalkbackAllowed}
+                disabled={roomStatus !== "open"}
+                level={levels[TALKBACK_CHANNEL_ID] ?? 0}
+                badge={talkers.length > 0 ? "Talking" : undefined}
+                badgeTone="ok"
+                onText="Allowed"
+                offText="Off"
+              >
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={talkbackMonitor}
+                    onChange={(e) => applyTalkbackMonitor(e.target.checked)}
+                  />
+                  <span>Hear students on my speakers / headphones</span>
+                </label>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={talkbackInMix}
+                    onChange={(e) => applyTalkbackInMix(e.target.checked)}
+                  />
+                  <span>Also send student voices into the live mix (all viewers hear them)</span>
+                </label>
+              </SourceRow>
+            </ul>
+          </div>
         </div>
       </section>
 
@@ -856,10 +1170,10 @@ export function HostPage() {
         </div>
 
         <div className="channel-grid">
-          {channels.length === 0 ? (
+          {deviceChannels.length === 0 ? (
             <p className="empty-hint">No microphones yet. Add at least one before Start class.</p>
           ) : (
-            channels.map((channel) => (
+            deviceChannels.map((channel) => (
               <AudioChannelCard
                 key={channel.id}
                 label={channel.label}
