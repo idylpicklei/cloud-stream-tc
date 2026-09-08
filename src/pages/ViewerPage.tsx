@@ -19,6 +19,36 @@ type PttMode = "hold" | "toggle";
 const NAME_KEY = "training-center-viewer-name";
 const PTT_MODE_KEY = "training-center-ptt-mode";
 
+function SpeakerIcon({ muted }: { muted: boolean }) {
+  return (
+    <svg
+      className="mute-btn__icon"
+      viewBox="0 0 24 24"
+      width="26"
+      height="26"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 9.5v5a1 1 0 0 0 1 1h2.6l4.2 3.3a.6.6 0 0 0 1-.5V5.7a.6.6 0 0 0-1-.5L7.6 8.5H5a1 1 0 0 0-1 1z" />
+      {muted ? (
+        <>
+          <line x1="16" y1="9" x2="21" y2="14" />
+          <line x1="21" y1="9" x2="16" y2="14" />
+        </>
+      ) : (
+        <>
+          <path d="M16 8.5a5 5 0 0 1 0 7" />
+          <path d="M18.5 6a8.5 8.5 0 0 1 0 12" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
@@ -375,9 +405,7 @@ export function ViewerPage() {
             onClick={toggleMute}
             title="Mute or unmute the class audio on this device only (M)"
           >
-            <span className="mute-btn__icon" aria-hidden="true">
-              {muted ? "🔇" : "🔊"}
-            </span>
+            <SpeakerIcon muted={muted} />
             {muted ? "Unmute" : "Mute"}
             <span className="mute-btn__hint">only for you</span>
           </button>
