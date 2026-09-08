@@ -1,0 +1,19 @@
+# Local secrets for `npm run dev` (Wrangler / Vite Cloudflare plugin).
+# Copy to `.dev.vars` and fill in. Never commit `.dev.vars`.
+
+# Cloudflare account id (dashboard → overview, or right sidebar)
+CLOUDFLARE_ACCOUNT_ID=
+
+# API token with Stream Edit permission
+# https://dash.cloudflare.com/profile/api-tokens
+STREAM_API_TOKEN=
+
+# Shared password teachers type on /host
+HOST_TOKEN=change-me-host-password
+
+# Optional but recommended: reuse one live input
+# Create under Stream → Live inputs, then paste the UID here
+STREAM_LIVE_INPUT_UID=
+
+# From any Stream player URL: customer-<CODE>.cloudflarestream.com
+STREAM_CUSTOMER_CODE=
