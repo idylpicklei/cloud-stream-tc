@@ -77,35 +77,59 @@ export function HostPage() {
       await pingHost(token.trim());
       const hostSession = await fetchHostSession(token.trim());
       setSession(hostSession);
+      // Auth succeeded — stay in studio even if camera/mic setup fails next.
       setUnlocked(true);
       if (hostSession.needsLiveInput && hostSession.message) {
         setError(hostSession.message);
       }
-      await setupDevices();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not unlock host studio");
       setUnlocked(false);
-    } finally {
       setBusy(false);
+      return;
+    }
+
+    // Device / permission errors must not bounce back to the password gate.
+    await setupDevices();
+    setBusy(false);
+  }
+
+  async function ensureMixer() {
+    if (mixerRef.current) return;
+    try {
+      const mixer = new AudioMixer();
+      mixerRef.current = mixer;
+      mixer.onLevels(setLevels);
+    } catch {
+      // AudioContext unavailable — rare (locked-down browser)
     }
   }
 
   async function setupDevices() {
-    const audioDevices = await listAudioInputDevices();
-    const videoDevices = await listVideoInputDevices();
-    setMics(audioDevices);
-    setCameras(videoDevices);
-    if (!cameraId && videoDevices[0]) setCameraId(videoDevices[0].deviceId);
-    if (!addDeviceId && audioDevices[0]) setAddDeviceId(audioDevices[0].deviceId);
+    await ensureMixer();
+    try {
+      const audioDevices = await listAudioInputDevices();
+      const videoDevices = await listVideoInputDevices();
+      setMics(audioDevices);
+      setCameras(videoDevices);
+      if (!cameraId && videoDevices[0]) setCameraId(videoDevices[0].deviceId);
+      if (!addDeviceId && audioDevices[0]) setAddDeviceId(audioDevices[0].deviceId);
 
-    if (!mixerRef.current) {
-      const mixer = new AudioMixer();
-      mixerRef.current = mixer;
-      mixer.onLevels(setLevels);
-    }
-
-    if (videoDevices[0]) {
-      await attachCamera(videoDevices[0].deviceId);
+      if (videoDevices[0]) {
+        await attachCamera(videoDevices[0].deviceId);
+      } else {
+        setError((prev) =>
+          prev ??
+          "No camera found yet. Plug one in (or allow access), then pick it under Camera.",
+        );
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `Studio opened, but devices need attention: ${err.message}`
+          : "Studio opened, but camera/mic setup needs attention.",
+      );
+      await ensureMixer();
     }
   }
 
@@ -113,13 +137,22 @@ export function HostPage() {
     setCameraId(deviceId);
     cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: false,
-    });
-    cameraStreamRef.current = stream;
-    if (previewRef.current) {
-      previewRef.current.srcObject = stream;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          deviceId: { exact: deviceId },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+      cameraStreamRef.current = stream;
+      if (previewRef.current) {
+        previewRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      cameraStreamRef.current = null;
+      throw err instanceof Error ? err : new Error("Could not open that camera");
     }
   }
 
@@ -352,7 +385,15 @@ export function HostPage() {
           <span>Which camera?</span>
           <select
             value={cameraId}
-            onChange={(e) => void attachCamera(e.target.value)}
+            onChange={(e) => {
+              void attachCamera(e.target.value).catch((err) => {
+                setError(
+                  err instanceof Error
+                    ? err.message
+                    : "Could not open that camera",
+                );
+              });
+            }}
             disabled={live}
           >
             {cameras.map((cam) => (
