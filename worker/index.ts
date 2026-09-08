@@ -189,9 +189,35 @@ export default {
       if (url.pathname === "/api/viewer" && request.method === "GET") {
         const resolved = await resolveLiveInput(env);
         if (!resolved.ok) {
+          if (resolved.status === 400) {
+            return json({
+              liveInputUid: null,
+              customerCode: env.STREAM_CUSTOMER_CODE?.trim() || null,
+              playerUrl: null,
+              whepUrl: null,
+              status: "idle",
+              name: "Class stream",
+              needsSetup: true,
+              message:
+                "No live input configured yet. The teacher must set STREAM_LIVE_INPUT_UID or create one from the host studio.",
+            });
+          }
           return json({ error: resolved.message }, resolved.status);
         }
         return json(publicViewerPayload(resolved.input, env));
+      }
+
+      if (url.pathname === "/api/host/ping" && request.method === "GET") {
+        const gate = requireHost(request, env);
+        if (gate) return gate;
+        return json({
+          ok: true,
+          hasLiveInputUid: Boolean(env.STREAM_LIVE_INPUT_UID?.trim()),
+          hasCustomerCode: Boolean(env.STREAM_CUSTOMER_CODE?.trim()),
+          hasStreamApi: Boolean(
+            env.CLOUDFLARE_ACCOUNT_ID && env.STREAM_API_TOKEN,
+          ),
+        });
       }
 
       if (url.pathname === "/api/host/session" && request.method === "GET") {
@@ -200,6 +226,20 @@ export default {
 
         const resolved = await resolveLiveInput(env);
         if (!resolved.ok) {
+          // Allow the studio UI to open before a live input exists.
+          if (resolved.status === 400) {
+            return json({
+              liveInputUid: null,
+              customerCode: env.STREAM_CUSTOMER_CODE?.trim() || null,
+              playerUrl: null,
+              whepUrl: null,
+              status: "idle",
+              name: "Class stream",
+              whipUrl: null,
+              needsLiveInput: true,
+              message: resolved.message,
+            });
+          }
           return json({ error: resolved.message }, resolved.status);
         }
 
@@ -218,6 +258,7 @@ export default {
           ...publicViewerPayload(resolved.input, env),
           whipUrl,
           created: resolved.created,
+          needsLiveInput: false,
         });
       }
 

@@ -6,6 +6,7 @@ import {
   createLiveInput,
   fetchHealth,
   fetchHostSession,
+  pingHost,
   type HealthStatus,
   type HostSession,
 } from "../lib/api";
@@ -73,9 +74,13 @@ export function HostPage() {
     setBusy(true);
     try {
       localStorage.setItem(TOKEN_KEY, token.trim());
+      await pingHost(token.trim());
       const hostSession = await fetchHostSession(token.trim());
       setSession(hostSession);
       setUnlocked(true);
+      if (hostSession.needsLiveInput && hostSession.message) {
+        setError(hostSession.message);
+      }
       await setupDevices();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not unlock host studio");
@@ -160,10 +165,12 @@ export function HostPage() {
     setError(null);
     setBusy(true);
     try {
-      if (!session?.whipUrl) {
-        const refreshed = await fetchHostSession(token.trim());
-        setSession(refreshed);
-        if (!refreshed.whipUrl) throw new Error("No WHIP URL from host session");
+      const refreshed = await fetchHostSession(token.trim());
+      setSession(refreshed);
+      if (!refreshed.whipUrl) {
+        throw new Error(
+          "No live input yet. Click “Create Cloudflare live input” (or set STREAM_LIVE_INPUT_UID), then try again.",
+        );
       }
 
       const mixer = mixerRef.current;
@@ -184,10 +191,7 @@ export function HostPage() {
       }
 
       const outbound = new MediaStream([videoTrack, audioTrack]);
-      const whipUrl = (session?.whipUrl ??
-        (await fetchHostSession(token.trim())).whipUrl) as string;
-
-      whipRef.current = await startWhipBroadcast(whipUrl, outbound);
+      whipRef.current = await startWhipBroadcast(refreshed.whipUrl, outbound);
       setLive(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start class");
@@ -316,13 +320,18 @@ export function HostPage() {
             </button>
           </div>
 
-          {session ? (
+          {session?.liveInputUid ? (
             <p className="meta-line">
               Live input: <code>{session.liveInputUid}</code>
             </p>
-          ) : null}
+          ) : (
+            <p className="meta-line">
+              No live input configured yet. Create one below, then put its UID in{" "}
+              <code>STREAM_LIVE_INPUT_UID</code> so viewers stay in sync after restart.
+            </p>
+          )}
 
-          {!health?.hasLiveInputUid ? (
+          {!session?.liveInputUid || session.needsLiveInput ? (
             <button
               type="button"
               className="btn btn--secondary"

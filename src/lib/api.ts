@@ -1,17 +1,20 @@
 export interface ViewerConfig {
-  liveInputUid: string;
+  liveInputUid: string | null;
   customerCode: string | null;
   playerUrl: string | null;
   whepUrl: string | null;
   status: string;
   name: string;
   note?: string;
+  needsSetup?: boolean;
+  message?: string;
 }
 
 export interface HostSession extends ViewerConfig {
-  whipUrl: string;
+  whipUrl: string | null;
   created?: boolean;
   message?: string;
+  needsLiveInput?: boolean;
 }
 
 export interface HealthStatus {
@@ -46,6 +49,13 @@ export async function fetchHealth(): Promise<HealthStatus> {
 export async function fetchViewerConfig(): Promise<ViewerConfig> {
   const res = await fetch("/api/viewer");
   return readJson<ViewerConfig>(res);
+}
+
+export async function pingHost(token: string): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/host/ping", {
+    headers: hostHeaders(token),
+  });
+  return readJson<{ ok: boolean }>(res);
 }
 
 export async function fetchHostSession(token: string): Promise<HostSession> {

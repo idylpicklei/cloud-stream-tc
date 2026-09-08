@@ -17,12 +17,25 @@ export function ViewerPage() {
     fetchViewerConfig()
       .then((data) => {
         setConfig(data);
+        if (data.needsSetup) {
+          setError(
+            data.message ??
+              "This class is not set up yet. Ask the teacher to create a live input in the host studio.",
+          );
+          return;
+        }
         // Prefer Stream player when customer code exists; WHEP always works for WHIP live.
         setMode(data.playerUrl ? "player" : "whep");
       })
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : "Could not load class stream"),
-      );
+      .catch((err) => {
+        const message =
+          err instanceof Error ? err.message : "Could not load class stream";
+        setError(
+          message.includes("STREAM_LIVE_INPUT_UID")
+            ? "This class is not set up yet. Ask the teacher to create a live input in the host studio."
+            : message,
+        );
+      });
 
     return () => {
       void stopWhepPlayback(whepRef.current);
