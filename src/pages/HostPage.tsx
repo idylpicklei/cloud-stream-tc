@@ -17,7 +17,13 @@ import {
   listVideoInputDevices,
   type MixerChannel,
 } from "../lib/audioMixer";
+import {
+  VideoCompositor,
+  type PipCorner,
+  type PipSize,
+} from "../lib/videoCompositor";
 import { startWhipBroadcast, stopWhipBroadcast, type WhipSession } from "../lib/whip";
+import type { SlideshowDeck } from "../lib/slideshow";
 
 const TOKEN_KEY = "training-center-host-token";
 
@@ -27,6 +33,21 @@ const ROLE_PRESETS = [
   { id: "laptop", label: "Laptop / system audio" },
   { id: "extra", label: "Extra input" },
 ] as const;
+
+type PipSource = "off" | "slideshow" | "camera" | "screen";
+
+const CORNER_OPTIONS: { id: PipCorner; label: string }[] = [
+  { id: "top-left", label: "Top left" },
+  { id: "top-right", label: "Top right" },
+  { id: "bottom-left", label: "Bottom left" },
+  { id: "bottom-right", label: "Bottom right" },
+];
+
+const SIZE_OPTIONS: { id: PipSize; label: string }[] = [
+  { id: "small", label: "Small" },
+  { id: "medium", label: "Medium" },
+  { id: "large", label: "Large" },
+];
 
 export function HostPage() {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) ?? "");
@@ -45,15 +66,33 @@ export function HostPage() {
   const [addDeviceId, setAddDeviceId] = useState("");
   const [addRole, setAddRole] = useState<string>(ROLE_PRESETS[0].id);
 
-  const previewRef = useRef<HTMLVideoElement>(null);
+  const [pipSource, setPipSource] = useState<PipSource>("off");
+  const [pipCorner, setPipCorner] = useState<PipCorner>("bottom-right");
+  const [pipSize, setPipSize] = useState<PipSize>("medium");
+  const [secondaryCameraId, setSecondaryCameraId] = useState("");
+  const [slideMeta, setSlideMeta] = useState<{ name: string; index: number; total: number } | null>(
+    null,
+  );
+  const [secondaryLabel, setSecondaryLabel] = useState<string | null>(null);
+
+  const previewHostRef = useRef<HTMLDivElement>(null);
   const mixerRef = useRef<AudioMixer | null>(null);
+  const compositorRef = useRef<VideoCompositor | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
+  const secondaryStreamRef = useRef<MediaStream | null>(null);
+  const deckRef = useRef<SlideshowDeck | null>(null);
   const whipRef = useRef<WhipSession | null>(null);
+  const slideInputRef = useRef<HTMLInputElement>(null);
 
   const viewerLink = useMemo(() => {
     if (typeof window === "undefined") return "/watch";
     return `${window.location.origin}/watch`;
   }, []);
+
+  const secondaryCameras = useMemo(
+    () => cameras.filter((cam) => cam.deviceId && cam.deviceId !== cameraId),
+    [cameras, cameraId],
+  );
 
   useEffect(() => {
     fetchHealth()
@@ -62,13 +101,48 @@ export function HostPage() {
   }, []);
 
   useEffect(() => {
+    if (!unlocked) return;
+    ensureCompositor();
+    mountPreviewCanvas();
+  }, [unlocked]);
+
+  useEffect(() => {
     return () => {
       void stopWhipBroadcast(whipRef.current);
       whipRef.current = null;
       cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
+      secondaryStreamRef.current?.getTracks().forEach((t) => t.stop());
+      deckRef.current?.dispose();
+      compositorRef.current?.dispose();
       mixerRef.current?.dispose();
     };
   }, []);
+
+  function ensureCompositor(): VideoCompositor {
+    if (!compositorRef.current) {
+      const compositor = new VideoCompositor();
+      compositorRef.current = compositor;
+      compositor.setCorner(pipCorner);
+      compositor.setPipSize(pipSize);
+      compositor.start(30);
+      const host = previewHostRef.current;
+      if (host) {
+        host.replaceChildren(compositor.canvas);
+        compositor.canvas.className = "camera-preview composition-preview";
+      }
+    }
+    return compositorRef.current;
+  }
+
+  function mountPreviewCanvas(): void {
+    const compositor = compositorRef.current;
+    const host = previewHostRef.current;
+    if (!compositor || !host) return;
+    if (compositor.canvas.parentElement !== host) {
+      host.replaceChildren(compositor.canvas);
+      compositor.canvas.className = "camera-preview composition-preview";
+    }
+  }
 
   async function unlockStudio() {
     setError(null);
@@ -78,7 +152,6 @@ export function HostPage() {
       await pingHost(token.trim());
       const hostSession = await fetchHostSession(token.trim());
       setSession(hostSession);
-      // Auth succeeded — stay in studio even if camera/mic setup fails next.
       setUnlocked(true);
       if (hostSession.needsLiveInput && hostSession.message) {
         setError(hostSession.message);
@@ -90,7 +163,6 @@ export function HostPage() {
       return;
     }
 
-    // Device / permission errors must not bounce back to the password gate.
     await setupDevices();
     setBusy(false);
   }
@@ -115,10 +187,14 @@ export function HostPage() {
       setCameras(videoDevices);
       if (!cameraId && videoDevices[0]) setCameraId(videoDevices[0].deviceId);
       if (!addDeviceId && audioDevices[0]) setAddDeviceId(audioDevices[0].deviceId);
+      const other = videoDevices.find((d) => d.deviceId !== videoDevices[0]?.deviceId);
+      if (!secondaryCameraId && other) setSecondaryCameraId(other.deviceId);
 
       if (videoDevices[0]) {
         await attachCamera(videoDevices[0].deviceId);
       } else {
+        ensureCompositor();
+        mountPreviewCanvas();
         setError((prev) =>
           prev ??
           "No camera found yet. Plug one in (or allow access), then pick it under Camera.",
@@ -131,6 +207,8 @@ export function HostPage() {
           : "Studio opened, but camera/mic setup needs attention.",
       );
       await ensureMixer();
+      ensureCompositor();
+      mountPreviewCanvas();
     }
   }
 
@@ -148,9 +226,9 @@ export function HostPage() {
         audio: false,
       });
       cameraStreamRef.current = stream;
-      if (previewRef.current) {
-        previewRef.current.srcObject = stream;
-      }
+      const compositor = ensureCompositor();
+      await compositor.setMainStream(stream);
+      mountPreviewCanvas();
     } catch (err) {
       cameraStreamRef.current = null;
       throw err instanceof Error ? err : new Error("Could not open that camera");
@@ -195,6 +273,155 @@ export function HostPage() {
     }
   }
 
+  function stopSecondaryStream() {
+    secondaryStreamRef.current?.getTracks().forEach((t) => t.stop());
+    secondaryStreamRef.current = null;
+    setSecondaryLabel(null);
+  }
+
+  function applyPipLayout(corner = pipCorner, size = pipSize) {
+    const compositor = compositorRef.current;
+    if (!compositor) return;
+    compositor.setCorner(corner);
+    compositor.setPipSize(size);
+  }
+
+  async function applyPipSource(next: PipSource) {
+    setError(null);
+    const compositor = ensureCompositor();
+    mountPreviewCanvas();
+
+    if (next === "off") {
+      stopSecondaryStream();
+      compositor.clearPip();
+      setPipSource("off");
+      return;
+    }
+
+    if (next === "slideshow") {
+      stopSecondaryStream();
+      const slide = deckRef.current?.current() ?? null;
+      if (!slide) {
+        setPipSource("slideshow");
+        compositor.clearPip();
+        setError("Upload a slideshow (PDF or images) before enabling slide PiP.");
+        return;
+      }
+      compositor.setPipStill(slide);
+      setPipSource("slideshow");
+      return;
+    }
+
+    if (next === "camera") {
+      const deviceId = secondaryCameraId || secondaryCameras[0]?.deviceId;
+      if (!deviceId) {
+        setError("No second camera available. Plug one in or choose Screen share.");
+        return;
+      }
+      stopSecondaryStream();
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            deviceId: { exact: deviceId },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+        secondaryStreamRef.current = stream;
+        stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+          if (secondaryStreamRef.current === stream) {
+            void applyPipSource("off");
+          }
+        });
+        await compositor.setPipVideoStream(stream);
+        setSecondaryCameraId(deviceId);
+        const label =
+          cameras.find((c) => c.deviceId === deviceId)?.label || "Second camera";
+        setSecondaryLabel(label);
+        setPipSource("camera");
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Could not open the second camera",
+        );
+      }
+      return;
+    }
+
+    if (next === "screen") {
+      stopSecondaryStream();
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+          audio: false,
+        });
+        secondaryStreamRef.current = stream;
+        stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+          if (secondaryStreamRef.current === stream) {
+            void applyPipSource("off");
+          }
+        });
+        await compositor.setPipVideoStream(stream);
+        setSecondaryLabel("Screen / tab share");
+        setPipSource("screen");
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Screen share was cancelled or is unavailable.",
+        );
+      }
+    }
+  }
+
+  async function onSlidesSelected(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const { SlideshowDeck } = await import("../lib/slideshow");
+      const deck = await SlideshowDeck.fromFiles(files);
+      deckRef.current?.dispose();
+      deckRef.current = deck;
+      setSlideMeta({ name: deck.name, index: deck.currentIndex, total: deck.length });
+      const compositor = ensureCompositor();
+      mountPreviewCanvas();
+      if (pipSource === "slideshow" || pipSource === "off") {
+        stopSecondaryStream();
+        compositor.setPipStill(deck.current());
+        setPipSource("slideshow");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load slideshow");
+    } finally {
+      setBusy(false);
+      if (slideInputRef.current) slideInputRef.current.value = "";
+    }
+  }
+
+  function stepSlide(direction: -1 | 1) {
+    const deck = deckRef.current;
+    if (!deck || deck.length === 0) return;
+    const slide = direction < 0 ? deck.prev() : deck.next();
+    setSlideMeta({ name: deck.name, index: deck.currentIndex, total: deck.length });
+    if (pipSource === "slideshow" && slide) {
+      compositorRef.current?.setPipStill(slide);
+    }
+  }
+
+  function clearSlideshow() {
+    deckRef.current?.dispose();
+    deckRef.current = null;
+    setSlideMeta(null);
+    if (pipSource === "slideshow") {
+      compositorRef.current?.clearPip();
+      setPipSource("off");
+    }
+  }
+
   async function startClass() {
     setError(null);
     setBusy(true);
@@ -218,10 +445,27 @@ export function HostPage() {
         throw new Error("Turn on your camera before going live.");
       }
 
-      const videoTrack = cameraStreamRef.current.getVideoTracks()[0];
+      const compositor = ensureCompositor();
+      await compositor.setMainStream(cameraStreamRef.current);
+      mountPreviewCanvas();
+      applyPipLayout();
+
+      // Re-apply active PiP so the composition is current at go-live.
+      if (pipSource === "slideshow") {
+        const slide = deckRef.current?.current() ?? null;
+        if (slide) compositor.setPipStill(slide);
+      } else if (
+        (pipSource === "camera" || pipSource === "screen") &&
+        secondaryStreamRef.current
+      ) {
+        await compositor.setPipVideoStream(secondaryStreamRef.current);
+      }
+
+      const composed = compositor.start(30);
+      const videoTrack = composed.getVideoTracks()[0];
       const audioTrack = mixer.mixedAudioTrack;
       if (!videoTrack || !audioTrack) {
-        throw new Error("Camera or mixed audio track is missing.");
+        throw new Error("Composed video or mixed audio track is missing.");
       }
 
       const outbound = new MediaStream([videoTrack, audioTrack]);
@@ -242,9 +486,10 @@ export function HostPage() {
       await stopWhipBroadcast(whipRef.current);
       whipRef.current = null;
       setLive(false);
-      // Keep camera + mixer running so the instructor can go live again quickly.
-      if (previewRef.current && cameraStreamRef.current) {
-        previewRef.current.srcObject = cameraStreamRef.current;
+      // Keep compositor + camera + mixer running for a quick re-live.
+      mountPreviewCanvas();
+      if (cameraStreamRef.current) {
+        await compositorRef.current?.setMainStream(cameraStreamRef.current);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not end class cleanly");
@@ -313,17 +558,18 @@ export function HostPage() {
         <div className="studio-top__brand">
           <BrandMark size="md" as="h1" />
           <p className="lede">
-            Pick your camera, add microphones, check the mix, then press Start class.
+            Compose camera + picture-in-picture, mix audio, then press Start class.
           </p>
         </div>
         <StatusBadge live={live} />
       </header>
 
-      <section className="studio-hero" aria-label="Camera and go-live controls">
+      <section className="studio-hero" aria-label="Composition preview and go-live controls">
         <div className="preview-shell">
-          <video ref={previewRef} className="camera-preview" autoPlay muted playsInline />
+          <div ref={previewHostRef} className="composition-host" />
           <div className="preview-caption">
-            Camera preview — students see this plus your mixed audio.
+            Live composition preview — students see this picture (main + PiP) plus your mixed
+            audio.
           </div>
         </div>
 
@@ -338,8 +584,8 @@ export function HostPage() {
           </button>
 
           <p className="hint">
-            Audio channels are mixed in your browser into <strong>one</strong> stream for Cloudflare
-            Stream (WHIP). Mute / Solo / Volume only affect that mix.
+            Video is composed in your browser (camera + optional PiP). Audio channels mix into{" "}
+            <strong>one</strong> track for Cloudflare Stream (WHIP).
           </p>
 
           <div className="share-row">
@@ -378,18 +624,16 @@ export function HostPage() {
         </div>
       </section>
 
-      <section className="studio-section" aria-label="Camera">
-        <h2>1. Camera</h2>
+      <section className="studio-section" aria-label="Main camera">
+        <h2>1. Main camera</h2>
         <label className="field">
-          <span>Which camera?</span>
+          <span>Which camera fills the stage?</span>
           <select
             value={cameraId}
             onChange={(e) => {
               void attachCamera(e.target.value).catch((err) => {
                 setError(
-                  err instanceof Error
-                    ? err.message
-                    : "Could not open that camera",
+                  err instanceof Error ? err.message : "Could not open that camera",
                 );
               });
             }}
@@ -404,10 +648,168 @@ export function HostPage() {
         </label>
       </section>
 
+      <section className="studio-section" aria-label="Picture-in-picture">
+        <div className="section-head">
+          <div>
+            <h2>2. Picture-in-picture</h2>
+            <p>
+              Overlay a slideshow, second camera, or screen share on the composed stream viewers
+              receive.
+            </p>
+          </div>
+        </div>
+
+        <div className="pip-source-row" role="group" aria-label="PiP source">
+          {(
+            [
+              ["off", "Off"],
+              ["slideshow", "Slideshow"],
+              ["camera", "2nd camera"],
+              ["screen", "Screen share"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={`btn btn--toggle${pipSource === id ? " is-active" : ""}`}
+              onClick={() => void applyPipSource(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="pip-layout-row">
+          <label className="field">
+            <span>PiP position</span>
+            <select
+              value={pipCorner}
+              onChange={(e) => {
+                const corner = e.target.value as PipCorner;
+                setPipCorner(corner);
+                applyPipLayout(corner, pipSize);
+              }}
+            >
+              {CORNER_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>PiP size</span>
+            <select
+              value={pipSize}
+              onChange={(e) => {
+                const size = e.target.value as PipSize;
+                setPipSize(size);
+                applyPipLayout(pipCorner, size);
+              }}
+            >
+              {SIZE_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="pip-panel">
+          <h3>Slideshow</h3>
+          <p className="hint">
+            Upload a PDF or a set of images (PNG, JPEG, WebP…). Step through slides while live.
+          </p>
+          <div className="pip-actions">
+            <input
+              ref={slideInputRef}
+              type="file"
+              accept="application/pdf,image/png,image/jpeg,image/webp,image/gif,image/bmp,.pdf"
+              multiple
+              hidden
+              onChange={(e) => void onSlidesSelected(e.target.files)}
+            />
+            <button
+              type="button"
+              className="btn btn--secondary"
+              disabled={busy}
+              onClick={() => slideInputRef.current?.click()}
+            >
+              Upload slides
+            </button>
+            {slideMeta ? (
+              <button type="button" className="btn btn--ghost" onClick={clearSlideshow}>
+                Clear slides
+              </button>
+            ) : null}
+          </div>
+          {slideMeta ? (
+            <div className="slide-controls">
+              <button
+                type="button"
+                className="btn btn--secondary"
+                disabled={slideMeta.index <= 0}
+                onClick={() => stepSlide(-1)}
+              >
+                Previous
+              </button>
+              <p className="slide-status">
+                Slide {slideMeta.index + 1} / {slideMeta.total}
+                <span className="slide-status__name">{slideMeta.name}</span>
+              </p>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                disabled={slideMeta.index >= slideMeta.total - 1}
+                onClick={() => stepSlide(1)}
+              >
+                Next
+              </button>
+            </div>
+          ) : (
+            <p className="empty-hint">No slideshow loaded yet.</p>
+          )}
+        </div>
+
+        <div className="pip-panel">
+          <h3>Second visual</h3>
+          <p className="hint">
+            Use another camera or share a window/tab. Choose <strong>2nd camera</strong> or{" "}
+            <strong>Screen share</strong> above to put it in PiP.
+          </p>
+          <label className="field">
+            <span>Second camera</span>
+            <select
+              value={secondaryCameraId}
+              onChange={(e) => {
+                setSecondaryCameraId(e.target.value);
+                if (pipSource === "camera") {
+                  void applyPipSource("camera");
+                }
+              }}
+            >
+              {secondaryCameras.length === 0 ? (
+                <option value="">No other camera detected</option>
+              ) : (
+                secondaryCameras.map((cam) => (
+                  <option key={cam.deviceId} value={cam.deviceId}>
+                    {cam.label || "Camera"}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+          {secondaryLabel && pipSource !== "off" && pipSource !== "slideshow" ? (
+            <p className="meta-line">Active PiP visual: {secondaryLabel}</p>
+          ) : null}
+        </div>
+      </section>
+
       <section className="studio-section" aria-label="Audio channels">
         <div className="section-head">
           <div>
-            <h2>2. Audio channels</h2>
+            <h2>3. Audio channels</h2>
             <p>
               Add instructor mic, room mic, laptop audio, or extras. Each has Mute, Solo, and Volume.
             </p>

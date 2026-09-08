@@ -26,7 +26,7 @@ export function HomePage() {
         <h2>How it works</h2>
         <ol>
           <li>Instructors open the studio and unlock it with the shared password.</li>
-          <li>Choose a camera, add mics (instructor, room, laptop), and check levels.</li>
+          <li>Choose a camera, add optional PiP (slides / 2nd camera / screen), and check mic levels.</li>
           <li>Press Start class. Share the viewer link. Press End class when done.</li>
         </ol>
       </section>
